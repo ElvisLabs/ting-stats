@@ -22,9 +22,6 @@
     #timePeriodPie { min-height: 430px; }
     body { padding-bottom: env(safe-area-inset-bottom); }
     #targetDuration.gen-show { display: inline !important; }
-    @media (min-width: 660px) {
-        body { max-width: 640px; margin: 0 auto; box-shadow: 0 0 24px rgba(0,0,0,.08); }
-    }
     /* ===== 编辑面板（生成器自带，非原页面元素） ===== */
     .gen-fab {
         position: fixed; right: 12px; top: 40%; z-index: 20000;
@@ -295,6 +292,7 @@
             <details>
                 <summary>打卡与年度数据</summary>
                 <div class="gen-row"><label>目标时长</label><input type="number" id="inTarget" min="0">分钟</div>
+                <div class="gen-row"><label>显示目标</label><input type="checkbox" id="inShowTarget" style="flex:0">在时长文案中显示目标</div>
                 <div class="gen-row"><label>连续打卡</label><input type="text" id="inStreak" placeholder="留空=自动"></div>
                 <div class="gen-row"><label>累计打卡</label><input type="text" id="inTotalSign" placeholder="留空=自动"></div>
                 <div class="gen-row"><label>近一年时长</label><input type="text" id="inYearHours" placeholder="小时，留空=自动"></div>
@@ -351,12 +349,12 @@
     <script src="https://dict.eudic.net/Content/heatmap/d3.v4.min.js" charset="utf-8"></script>
     <script src="https://dict.eudic.net/Content/heatmap/calendar-heatmap.js?20230227"></script>
     <script>
-    /* 与原站一致的移动端 rem 缩放（宽度封顶 640） */
+    /* 与原站一致的 rem 缩放 */
     (function (d, w) {
         var el = d.documentElement;
         function resize() {
-            var n = Math.min(el.clientWidth || 640, 640);
-            el.style.fontSize = (100 * n / 640) + 'px';
+            var n = el.clientWidth || 640;
+            el.style.fontSize = n >= 840 ? '150px' : n >= 640 ? '100px' : (100 * n / 640) + 'px';
         }
         w.addEventListener('resize', resize);
         resize();
@@ -507,11 +505,11 @@
         var yh = state.yearHours !== '' ? state.yearHours : (function () {
             var sum = 0, t = new Date();
             for (var i = 0; i < 365; i++) sum += minutesOf(fmt(addDays(t, -i)));
-            return Math.round(sum / 60);
+            return (sum / 60).toFixed(1);
         })();
         $('#playDuration').innerHTML = '近一年时长为<span class="lightDay">' + yh + '小时</span>';
         var tgt = $('#targetDuration');
-        if (state.target > 0) {
+        if (state.showTarget && state.target > 0) {
             tgt.className = 'gen-show';
             tgt.innerHTML = '，打卡目标时长 <span class="lightDay">' + state.target + '分钟</span>';
         } else { tgt.className = ''; tgt.innerHTML = ''; }
@@ -532,6 +530,12 @@
 
     /* ---------- 打卡日历 ---------- */
     var view = { y: new Date().getFullYear(), m: new Date().getMonth() + 1 };
+    function earliestDataYM() {
+        var min = null;
+        for (var k in state.days) if (state.days[k] > 0 && (!min || k < min)) min = k;
+        if (!min) return { y: view.y, m: view.m };
+        return { y: +min.slice(0, 4), m: +min.slice(5, 7) };
+    }
     function renderCalendar() {
         var y = view.y, m = view.m;
         $('#calendar .fullyear').textContent = y;
@@ -543,9 +547,10 @@
         var now = new Date(), curY = now.getFullYear(), curM = now.getMonth() + 1, curD = now.getDate();
         var isCurMonth = (y === curY && m === curM);
         var html = '', i, ds;
+        var viewIsPast = (y < curY) || (y === curY && m < curM);
         var pm = m === 1 ? 12 : m - 1, pmy = m === 1 ? y - 1 : y;
         for (i = before - 1; i > -1; i--) {
-            html += '<li><span data-day="' + pmy + '-' + pm + '-' + (prevDays - i) + '" class="borderScale unmonth unmonthPre">' + (prevDays - i) + '</span></li>';
+            html += '<li><span data-day="' + pmy + '-' + pm + '-' + (prevDays - i) + '" class="borderScale unmonth unmonthPre unsign">' + (prevDays - i) + '</span></li>';
         }
         for (i = 1; i <= days; i++) {
             ds = y + '-' + pad(m) + '-' + pad(i);
@@ -559,12 +564,14 @@
         }
         var nm = m === 12 ? 1 : m + 1, nmy = m === 12 ? y + 1 : y;
         for (i = 1; i <= cells - before - days; i++) {
-            html += '<li><span data-day="' + nmy + '-' + nm + '-' + i + '" class="borderScale unmonth unmonthNext">' + i + '</span></li>';
+            html += '<li><span data-day="' + nmy + '-' + nm + '-' + i + '" class="borderScale unmonth unmonthNext' + (viewIsPast ? ' unsign' : '') + '">' + i + '</span></li>';
         }
         var lists = $$('#calendar .daylist');
         lists[0].innerHTML = '';
         lists[1].innerHTML = html;
         $('#calendar .next').style.display = isCurMonth ? 'none' : 'block';
+        var o = earliestDataYM();
+        $('#calendar .pre').style.display = (y < o.y || (y === o.y && m <= o.m)) ? 'none' : 'block';
         renderCheckCounts();
     }
     function renderCheckCounts() {
@@ -884,6 +891,8 @@
         $('#inStart').addEventListener('change', function () { setCustomRange(this.value, $('#inEnd').value); });
         $('#inEnd').addEventListener('change', function () { setCustomRange($('#inStart').value, this.value); });
         bind('#inTarget', function () { return state.target; }, function (v) { state.target = Math.max(0, +v || 0); renderTingChart(); renderCalendar(); });
+        $('#inShowTarget').checked = !!state.showTarget;
+        $('#inShowTarget').addEventListener('change', function () { state.showTarget = this.checked; save(); renderTingChart(); });
         bind('#inStreak', function () { return state.streakOv; }, function (v) { state.streakOv = v.trim(); renderCheckCounts(); });
         bind('#inTotalSign', function () { return state.totalOv; }, function (v) { state.totalOv = v.trim(); renderCheckCounts(); });
         bind('#inYearHours', function () { return state.yearHours; }, function (v) { state.yearHours = v.trim(); renderTingChart(); });
